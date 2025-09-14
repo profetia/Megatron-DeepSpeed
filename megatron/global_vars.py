@@ -9,7 +9,7 @@ import torch
 from megatron import dist_signal_handler
 from megatron.tokenizer import build_tokenizer
 from .microbatches import build_num_microbatches_calculator
-from .timers import Timers
+from .timers import DummyTimer, Timers
 
 _GLOBAL_ARGS = None
 _GLOBAL_RETRO_ARGS = None
@@ -220,7 +220,29 @@ def _set_timers(args):
     """Initialize timers."""
     global _GLOBAL_TIMERS
     _ensure_var_is_not_initialized(_GLOBAL_TIMERS, 'timers')
-    _GLOBAL_TIMERS = Timers(args.timing_log_level, args.timing_log_option)
+
+    class AdHocTimer(DummyTimer):
+
+        def elapsed(self, reset=True, barrier=False):
+            return 1.0
+
+    class DummyTimers(Timers):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+
+            self._dummy_timer = AdHocTimer()
+
+        def __call__(self, name, log_level=None):
+            return self._dummy_timer
+
+        def log(self, names, rank=None, normalizer=1.0, reset=True, barrier=False):
+            pass
+
+        def write(self, names, writer, iteration, normalizer=1.0,
+                    reset=False, barrier=False):
+            pass
+
+    _GLOBAL_TIMERS = DummyTimers(args.timing_log_level, args.timing_log_option)
 
 
 def _ensure_var_is_initialized(var, name):

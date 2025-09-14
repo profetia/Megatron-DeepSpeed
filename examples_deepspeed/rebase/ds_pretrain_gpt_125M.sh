@@ -18,10 +18,10 @@ seq_len=2048
 
 ## GPT-3 Small 125M
 model_size=0.125
-num_layers=12
+num_layers=4
 hidden_size=768
 num_attn_heads=12
-global_batch_size=256
+global_batch_size=1
 lr=6.0e-4
 min_lr=1.0e-6
 init_std=0.02
@@ -131,21 +131,21 @@ lr_decay_style="cosine"
 ###############################################################################
 ### Parallelism configs
 ## Model parallelism, 1 is no MP
-mp_size=2
+mp_size=1
 
 ## Pipeline parallelism. To disable PP, set pp_size to 1 and no_pp to true.
 ## Note that currently both curriculum learning and random-LTD are NOT
 ## compatible with pipeline parallelism.
-pp_size=2
-no_pp="false"
+pp_size=1
+no_pp="true"
 
 ## ZeRO-based data parallelism, stage=0 will disable ZeRO
-zero_stage=1
+zero_stage=0
 
 ## Total number of GPUs. ds_ssh is from DeepSpeed library.
-num_gpus=$(($(ds_ssh nvidia-smi --query-gpu=name --format=csv,noheader | wc -l)-2))
-num_gpus_pernode=$(nvidia-smi --query-gpu=name --format=csv,noheader | wc -l)
-num_node=$(( ${num_gpus} / ${num_gpus_pernode} ))
+num_gpus=1
+num_gpus_pernode=1
+num_node=1
 
 ## Data parallel size.
 dp_size=$(( ${num_gpus} / ${pp_size} / ${mp_size} ))
@@ -154,7 +154,7 @@ dp_size=$(( ${num_gpus} / ${pp_size} / ${mp_size} ))
 ## Make sure that batch_size <= global_batch_size*pp_size*mp_size/num_gpus
 ## Reduce it manually if GPU OOM
 # batch_size=$(( ${global_batch_size} / ${dp_size} ))
-batch_size=2
+batch_size=1
 ###############################################################################
 ### Misc configs
 log_interval=10
@@ -169,8 +169,8 @@ estimated_train_iter=$((${train_tokens} / ${seq_len} / ${global_batch_size}))
 save_interval=100
 
 ## Activation checkpointing saves GPU memory, but reduces training speed
-activation_checkpoint="true"
-# activation_checkpoint="false"
+# activation_checkpoint="true"
+activation_checkpoint="false"
 
 ## Whether or not log optimizer states (norms, max abs values) to tensorboard.
 ## This is not required for training and might save GPU memory when turned off.
@@ -182,22 +182,9 @@ host="${HOSTNAME}"
 seed=1234
 num_workers=0
 
-data_path="BookCorpusDataset_text_document"
-if [ ! -f "BookCorpusDataset_text_document.bin" ]; then
-    wget https://the-eye.eu/public/AI/pile_neox/data/BookCorpusDataset_text_document.bin
-fi
-if [ ! -f "BookCorpusDataset_text_document.idx" ]; then
-    wget https://the-eye.eu/public/AI/pile_neox/data/BookCorpusDataset_text_document.idx
-fi
-
-vocab_path="gpt2-vocab.json"
-if [ ! -f "$vocab_path" ]; then
-    wget https://s3.amazonaws.com/models.huggingface.co/bert/gpt2-vocab.json
-fi
-merge_path="gpt2-merges.txt"
-if [ ! -f "$merge_path" ]; then
-    wget https://s3.amazonaws.com/models.huggingface.co/bert/gpt2-merges.txt
-fi
+data_path="/home/ubuntu/X-MoE/Megatron-DeepSpeed-X-MoE/examples_xmoe/data/my-gpt2_text_document"
+vocab_path="/home/ubuntu/X-MoE/Megatron-DeepSpeed-X-MoE/examples_xmoe/data/gpt2-vocab.json"
+merge_path="/home/ubuntu/X-MoE/Megatron-DeepSpeed-X-MoE/examples_xmoe/data/gpt2-merges.txt"
 
 prescale_grad="true"
 jobname="gpt_${model_size}B_tok${train_tokens_in_billion}B"
@@ -263,7 +250,6 @@ megatron_options=" \
     --clip-grad 1.0 \
     --hysteresis 2 \
     --num-workers ${num_workers} \
-    --fp16 \
     --seed ${seed} \
     --load ${checkpoint_path} \
     --save ${checkpoint_path} \
@@ -272,7 +258,9 @@ megatron_options=" \
     --log-timers-to-tensorboard \
     --log-batch-size-to-tensorboard \
     --log-validation-ppl-to-tensorboard \
-    --tensorboard-dir ${tensorboard_path}"
+    --tensorboard-dir ${tensorboard_path} \
+    --no-gradient-accumulation-fusion \
+    --tensorboard-log-interval 10000000" 
 
 if [ "${activation_checkpoint}" = "true" ]; then
 megatron_options="${megatron_options} \
@@ -328,4 +316,6 @@ if [[ $iteration -gt 0 ]]; then
     ds_ssh "echo $iteration_2 > $iteration_file_2"
 fi
 
-deepspeed ${dir}/../../pretrain_gpt.py ${megatron_options} ${data_options} ${deepspeed_options} &>> ${log_path}/${jobname}_${host}_${current_time}.log
+deepspeed ${dir}/../../pretrain_gpt.py \
+    ${megatron_options} ${data_options} ${deepspeed_options} \
+    2>&1 | tee ${log_path}/${jobname}_${host}_${current_time}.log

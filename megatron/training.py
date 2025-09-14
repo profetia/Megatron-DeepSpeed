@@ -745,6 +745,11 @@ def train_step(forward_step_func, data_iterator,
                     args.data_parallel_size
         model[0].step(lr_kwargs={'increment': increment})
         update_successful = model[0].was_step_applied()
+
+        if get_accelerator().device_name() == 'xla':
+            import torch_xla.core.xla_model as xm
+
+            xm.mark_step()
     else:
         update_successful, grad_norm, num_zeros_in_grad = optimizer.step(args, timers)
     timers('optimizer').stop()

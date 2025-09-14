@@ -288,6 +288,11 @@ def forward_step(data_iterator, model):
     if args.curriculum_learning_legacy and args.curriculum_seqlen < args.seq_length:
         loss_mask = loss_mask[:, :args.curriculum_seqlen].contiguous()
 
+    if get_accelerator().device_name() == 'xla':
+        import torch_xla.core.xla_model as xm
+
+        xm.mark_step()
+
     moe_losses = []
     for moe_loss in other_losses:
         if moe_loss is not None:
