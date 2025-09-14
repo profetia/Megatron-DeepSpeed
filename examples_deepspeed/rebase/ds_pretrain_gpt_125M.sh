@@ -250,6 +250,7 @@ megatron_options=" \
     --clip-grad 1.0 \
     --hysteresis 2 \
     --num-workers ${num_workers} \
+    --fp16 \
     --seed ${seed} \
     --load ${checkpoint_path} \
     --save ${checkpoint_path} \
@@ -260,7 +261,7 @@ megatron_options=" \
     --log-validation-ppl-to-tensorboard \
     --tensorboard-dir ${tensorboard_path} \
     --no-gradient-accumulation-fusion \
-    --tensorboard-log-interval 10000000" 
+    --no-masked-softmax-fusion" 
 
 if [ "${activation_checkpoint}" = "true" ]; then
 megatron_options="${megatron_options} \

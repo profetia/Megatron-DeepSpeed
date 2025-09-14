@@ -17,6 +17,8 @@ from .transformer import ParallelTransformer
 from .utils import get_linear_layer
 from .utils import init_method_normal, scaled_init_method_normal, gather_and_init
 
+from deepspeed.accelerator import get_accelerator
+
 
 def parallel_lm_logits(input_, word_embeddings_weight, parallel_output,
                        bias=None):
@@ -170,7 +172,8 @@ class Embedding(MegatronModule):
                 self.init_method(self.position_embeddings.local_embeddings.weight)
             else:
                 self.position_embeddings = torch.nn.Embedding(
-                    max_sequence_length, self.hidden_size)
+                    max_sequence_length, self.hidden_size,
+                    device=get_accelerator().current_device_name())
                 # Initialize the position embeddings.
                 if args.perform_initialization:
                     if args.zero_stage == 3:

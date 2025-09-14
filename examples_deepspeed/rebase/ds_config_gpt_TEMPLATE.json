@@ -11,7 +11,7 @@
   "prescale_gradients": PRESCALE_GRAD,
 
   "fp16": {
-    "enabled": false,
+    "enabled": true,
     "loss_scale": 0,
     "loss_scale_window": 500,
     "hysteresis": 2,

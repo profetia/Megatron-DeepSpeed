@@ -1008,7 +1008,8 @@ class ParallelTransformerLayer(MegatronModule):
             else:
                 self.input_layernorm = LayerNorm(
                     config.hidden_size,
-                    eps=config.layernorm_epsilon)
+                    eps=config.layernorm_epsilon,
+                    device=get_accelerator().current_device_name())
         else:
             self.input_layernorm = RMSNorm(config.hidden_size, config.layernorm_epsilon,
                                            sequence_parallel=config.sequence_parallel)
@@ -1041,7 +1042,8 @@ class ParallelTransformerLayer(MegatronModule):
             else:
                 self.post_attention_layernorm = LayerNorm(
                     config.hidden_size,
-                    eps=config.layernorm_epsilon)
+                    eps=config.layernorm_epsilon,
+                    device=get_accelerator().current_device_name())
         else:
             self.post_attention_layernorm = RMSNorm(config.hidden_size, config.layernorm_epsilon,
                                                     sequence_parallel=config.sequence_parallel)
@@ -1888,7 +1890,8 @@ class ParallelTransformer(MegatronModule):
                 else:
                     self.final_layernorm = LayerNorm(
                         config.hidden_size,
-                        eps=config.layernorm_epsilon)
+                        eps=config.layernorm_epsilon,
+                        device=get_accelerator().current_device_name())
             else:
                 self.final_layernorm = RMSNorm(config.hidden_size, config.layernorm_epsilon,
                                                sequence_parallel=config.sequence_parallel)
