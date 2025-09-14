@@ -1127,16 +1127,16 @@ def training_log(loss_dict, total_loss_dict, learning_rate, iteration,
         tokens_per_gpu_per_second_per_replica = tokens_per_gpu_per_second / args.data_parallel_size
 
         if writer.is_enabled():
-            writer.add_scalar_to_wandb('throughput/iteration-time', elapsed_time_per_iteration, iteration)  # 1000 ms / s
-            writer.add_scalar_to_wandb('throughput/samples_per_sec', samples_per_sec, iteration)
-            writer.add_scalar_to_wandb('throughput/samples_per_sec_per_replica', samples_per_sec_per_replica, iteration)
-            writer.add_scalar_to_wandb('throughput/tokens_per_sec', tokens_per_sec, iteration)
-            writer.add_scalar_to_wandb('throughput/tokens_per_sec_per_replica', tokens_per_sec_per_replica, iteration)
-            writer.add_scalar_to_wandb('throughput/tokens_per_gpu_per_sec', tokens_per_gpu_per_second, iteration)
-            writer.add_scalar_to_wandb('throughput/tokens_per_gpu_per_sec_per_replica', tokens_per_gpu_per_second_per_replica, iteration)
-            writer.add_scalar_to_wandb('throughput/tflops', tflops, iteration)
-            writer.add_scalar_to_wandb('throughput/approx_params_in_billions', approx_parameters_in_billions, iteration)
-            writer.add_scalar_to_wandb('throughput/elapsed_ms_per_iteration', elapsed_time_per_iteration, iteration)
+            writer.add_scalar('throughput/iteration-time', elapsed_time_per_iteration, iteration)  # 1000 ms / s
+            writer.add_scalar('throughput/samples_per_sec', samples_per_sec, iteration)
+            writer.add_scalar('throughput/samples_per_sec_per_replica', samples_per_sec_per_replica, iteration)
+            writer.add_scalar('throughput/tokens_per_sec', tokens_per_sec, iteration)
+            writer.add_scalar('throughput/tokens_per_sec_per_replica', tokens_per_sec_per_replica, iteration)
+            writer.add_scalar('throughput/tokens_per_gpu_per_sec', tokens_per_gpu_per_second, iteration)
+            writer.add_scalar('throughput/tokens_per_gpu_per_sec_per_replica', tokens_per_gpu_per_second_per_replica, iteration)
+            writer.add_scalar('throughput/tflops', tflops, iteration)
+            writer.add_scalar('throughput/approx_params_in_billions', approx_parameters_in_billions, iteration)
+            writer.add_scalar('throughput/elapsed_ms_per_iteration', elapsed_time_per_iteration, iteration)
             if loss_dict is not None:
                 for k, v in loss_dict.items():
                     writer.add_scalar_to_wandb(f'loss/{k}', v, iteration)

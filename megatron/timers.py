@@ -197,6 +197,9 @@ class Timers:
                 rank_name_to_time[rank, i] = self._timers[name].elapsed(
                     reset=reset)
 
+        if world_size == 1:
+            return rank_name_to_time
+
         # See the note above for why we are not using gather.
         if version.parse(torch.__version__) >= version.parse('1.13'):
             torch.distributed.all_gather_into_tensor(rank_name_to_time.view(-1),
