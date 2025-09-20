@@ -21,7 +21,7 @@ model_size=0.125
 num_layers=4
 hidden_size=768
 num_attn_heads=12
-global_batch_size=1
+global_batch_size=2
 lr=6.0e-4
 min_lr=1.0e-6
 init_std=0.02
@@ -143,8 +143,8 @@ no_pp="true"
 zero_stage=0
 
 ## Total number of GPUs. ds_ssh is from DeepSpeed library.
-num_gpus=1
-num_gpus_pernode=1
+num_gpus=2
+num_gpus_pernode=2
 num_node=1
 
 ## Data parallel size.

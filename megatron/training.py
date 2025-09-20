@@ -223,6 +223,12 @@ def pretrain(train_valid_test_dataset_provider,
     timers.log(['model-and-optimizer-setup',
                 'train/valid/test-data-iterators-setup'], barrier=True)
 
+    if args.deepspeed:
+        if get_accelerator().device_name() == 'xla':
+            import torch_xla.core.xla_model as xm
+
+            xm.mark_step()
+
     if not args.skip_train:
         print_rank_0('training ...')
 
@@ -715,6 +721,12 @@ def train_step(forward_step_func, data_iterator,
         micro_batch_size=args.micro_batch_size,
         decoder_seq_length=args.decoder_seq_length,
         forward_only=False)
+
+    if args.deepspeed:
+        if get_accelerator().device_name() == 'xla':
+            import torch_xla.core.xla_model as xm
+
+            xm.mark_step()
 
     # reset timers if necessary
     if config.timers is None:
