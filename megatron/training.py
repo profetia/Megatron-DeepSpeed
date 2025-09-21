@@ -1218,6 +1218,7 @@ def training_log(loss_dict, total_loss_dict, learning_rate, iteration,
 
 def save_checkpoint_and_time(iteration, model, optimizer, opt_param_scheduler):
     args = get_args()
+
     if args.deepspeed:
         if get_accelerator().device_name() == 'xla':
             get_accelerator().synchronize()
@@ -1227,9 +1228,22 @@ def save_checkpoint_and_time(iteration, model, optimizer, opt_param_scheduler):
     # all ranks report the max time.
     timers('save-checkpoint', log_level=0).start(barrier=True)
     save_checkpoint(iteration, model, optimizer, opt_param_scheduler)
+
+    if args.deepspeed:
+        if get_accelerator().device_name() == 'xla':
+            get_accelerator().synchronize()
+
     timers('save-checkpoint').stop(barrier=True)
     checkpoint_throughput_calculator(model, timers('save-checkpoint').elapsed(reset=False))
     timers.log(['save-checkpoint'])
+
+    if args.deepspeed:
+        if get_accelerator().device_name() == 'xla':
+            import gc
+
+            gc.collect()
+
+            get_accelerator().synchronize()
 
 
 def train(forward_step_func, model, optimizer, opt_param_scheduler,
@@ -1466,6 +1480,11 @@ def evaluate(forward_step_func,
                     micro_batch_size=args.micro_batch_size,
                     decoder_seq_length=args.decoder_seq_length,
                     forward_only=True)
+
+            if args.deepspeed:
+                if get_accelerator().device_name() == 'xla':
+                    get_accelerator().synchronize()
+
             config.timers = get_timers()
 
             # Empty unused memory
@@ -1495,6 +1514,10 @@ def evaluate(forward_step_func,
                 decoder_seq_length=args.decoder_seq_length,
                 forward_only=True,
                 collect_non_loss_data=True)
+
+            if args.deepspeed:
+                if get_accelerator().device_name() == 'xla':
+                    get_accelerator().synchronize()
 
     # Move model back to the train mode.
     for model_module in model:
