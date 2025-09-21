@@ -143,10 +143,20 @@ def pretrain(train_valid_test_dataset_provider,
     # This will be closer to what scheduler will see (outside of
     # image ... launches.
     global _TRAIN_START_TIME
+
+    if get_accelerator().device_name() == 'xla':
+        now_time = datetime.now()
+        anchor_time = datetime(now_time.year, now_time.month, now_time.day).timestamp()
+        _TRAIN_START_TIME -= anchor_time
+
     start_time_tensor = get_accelerator().DoubleTensor([_TRAIN_START_TIME])
     torch.distributed.all_reduce(start_time_tensor,
                                  op=torch.distributed.ReduceOp.MIN)
     _TRAIN_START_TIME = start_time_tensor.item()
+
+    if get_accelerator().device_name() == 'xla':
+        _TRAIN_START_TIME += anchor_time
+
     print_rank_0('time to initialize megatron (seconds): {:.3f}'.format(
         time.time() - _TRAIN_START_TIME))
     print_datetime('after megatron is initialized')
@@ -218,16 +228,14 @@ def pretrain(train_valid_test_dataset_provider,
     if args.mos or args.kd: # Set up teacher model
         args.teacher_model = setup_teacher_model(args, model_provider)
 
+    if args.deepspeed:
+        if get_accelerator().device_name() == 'xla':
+            get_accelerator().synchronize()
+
     # Print setup timing.
     print_rank_0('done with setup ...')
     timers.log(['model-and-optimizer-setup',
                 'train/valid/test-data-iterators-setup'], barrier=True)
-
-    if args.deepspeed:
-        if get_accelerator().device_name() == 'xla':
-            import torch_xla.core.xla_model as xm
-
-            xm.mark_step()
 
     if not args.skip_train:
         print_rank_0('training ...')
@@ -724,9 +732,7 @@ def train_step(forward_step_func, data_iterator,
 
     if args.deepspeed:
         if get_accelerator().device_name() == 'xla':
-            import torch_xla.core.xla_model as xm
-
-            xm.mark_step()
+            get_accelerator().synchronize()
 
     # reset timers if necessary
     if config.timers is None:
@@ -759,9 +765,7 @@ def train_step(forward_step_func, data_iterator,
         update_successful = model[0].was_step_applied()
 
         if get_accelerator().device_name() == 'xla':
-            import torch_xla.core.xla_model as xm
-
-            xm.mark_step()
+            get_accelerator().synchronize()
     else:
         update_successful, grad_norm, num_zeros_in_grad = optimizer.step(args, timers)
     timers('optimizer').stop()
@@ -1213,6 +1217,11 @@ def training_log(loss_dict, total_loss_dict, learning_rate, iteration,
 
 
 def save_checkpoint_and_time(iteration, model, optimizer, opt_param_scheduler):
+    args = get_args()
+    if args.deepspeed:
+        if get_accelerator().device_name() == 'xla':
+            get_accelerator().synchronize()
+
     timers = get_timers()
     # Extra barrier is added to make sure
     # all ranks report the max time.
@@ -1511,6 +1520,11 @@ def evaluate_and_print_results(prefix, forward_step_func,
                                verbose=False, write_to_tensorboard=True, test=False):
     """Helper function to evaluate and dump results on screen."""
     args = get_args()
+
+    if args.deepspeed:
+        if get_accelerator().device_name() == 'xla':
+            get_accelerator().synchronize()
+
     if write_to_tensorboard:
         writer = interop_tool_logger(tb_writer=get_tensorboard_writer(), wandb_writer=get_wandb_writer())
     else:
@@ -1523,20 +1537,21 @@ def evaluate_and_print_results(prefix, forward_step_func,
         process_non_loss_data_func, config, verbose)
     string = ' validation loss at {} | '.format(prefix)
     for key in total_loss_dict:
-        string += '{} value: {:.6E} | '.format(key, total_loss_dict[key].item())
-        ppl = math.exp(min(20, total_loss_dict[key].item()))
+        total_loss = total_loss_dict[key].item()
+        string += '{} value: {:.6E} | '.format(key, total_loss)
+        ppl = math.exp(min(20, total_loss))
         string += '{} PPL: {:.6E} | '.format(key, ppl)
         if writer.is_enabled() and is_last_rank():
             data_type = 'test' if test else 'validation'
             writer.add_scalar(f'lm-loss-validation/{key} {data_type}',
-                              total_loss_dict[key].item(),
+                              total_loss,
                               iteration)
             writer.add_scalar(f'lm-loss-validation/{key} {data_type} vs samples',
-                              total_loss_dict[key].item(),
+                              total_loss,
                               args.consumed_train_samples,
                               x_axis_samples)
             writer.add_scalar(f'lm-loss-validation/{key} {data_type} vs tokens',
-                              total_loss_dict[key].item(),
+                              total_loss,
                               args.consumed_train_tokens,
                               x_axis_tokens)
             if args.log_validation_ppl_to_tensorboard:
