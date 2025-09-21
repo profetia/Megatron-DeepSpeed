@@ -683,6 +683,11 @@ def train_step(forward_step_func, data_iterator,
                model, optimizer, opt_param_scheduler, config):
     """Single training step."""
     args = get_args()
+
+    if args.deepspeed:
+        if get_accelerator().device_name() == 'xla':
+            get_accelerator().synchronize()
+
     timers = get_timers()
 
     if args.deepspeed and args.ds_pipeline_enabled:
@@ -880,6 +885,11 @@ def training_log(loss_dict, total_loss_dict, learning_rate, iteration,
                  model=None, optimizer=None):
     """Log training information such as losses, timing, ...."""
     args = get_args()
+
+    if args.deepspeed:
+        if get_accelerator().device_name() == 'xla':
+            get_accelerator().synchronize()
+
     timers = get_timers()
     writer = interop_tool_logger(tb_writer=get_tensorboard_writer(), \
                                  wandb_writer=get_wandb_writer())
