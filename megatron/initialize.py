@@ -216,6 +216,9 @@ def _initialize_distributed():
                 if get_accelerator().device_name() != 'xla':
                     assert args.local_rank == device, \
                         'expected local-rank to be the same as rank % device-count.'
+            elif args.deepspeed and get_accelerator().device_name() == 'xla' \
+                    and 'LOCAL_RANK' in os.environ:
+                args.local_rank = int(os.environ['LOCAL_RANK'])
             else:
                 args.local_rank = device
 
