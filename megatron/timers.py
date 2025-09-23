@@ -220,9 +220,16 @@ class Timers:
             rank_to_time = rank_to_time[rank_to_time > 0.0]
             # If the timer exists:
             if rank_to_time.numel() > 0:
+                rank_to_time_min = rank_to_time.min()
+                rank_to_time_max = rank_to_time.max()
+
+                # Synchronize before accessing `rank_to_time`
+                if get_accelerator().device_name() == 'xla':
+                    get_accelerator().synchronize()
+
                 name_to_min_max_time[name] = (
-                    rank_to_time.min().item() / normalizer,
-                    rank_to_time.max().item() / normalizer)
+                    rank_to_time_min.item() / normalizer,
+                    rank_to_time_max.item() / normalizer)
         return name_to_min_max_time
 
 

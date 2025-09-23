@@ -144,6 +144,8 @@ def pretrain(train_valid_test_dataset_provider,
     # image ... launches.
     global _TRAIN_START_TIME
 
+    # Adjust timestamp to be relative to the beginning of the day
+    # because XLA does not support fp64 computation.
     if get_accelerator().device_name() == 'xla':
         now_time = datetime.now()
         anchor_time = datetime(now_time.year, now_time.month, now_time.day).timestamp()
@@ -152,8 +154,14 @@ def pretrain(train_valid_test_dataset_provider,
     start_time_tensor = get_accelerator().DoubleTensor([_TRAIN_START_TIME])
     torch.distributed.all_reduce(start_time_tensor,
                                  op=torch.distributed.ReduceOp.MIN)
+
+    # Synchronize before accessing `start_time_tensor`
+    if get_accelerator().device_name() == 'xla':
+        get_accelerator().synchronize()
+
     _TRAIN_START_TIME = start_time_tensor.item()
 
+    # Adjust timestamp back to the absolute time.
     if get_accelerator().device_name() == 'xla':
         _TRAIN_START_TIME += anchor_time
 
@@ -228,6 +236,7 @@ def pretrain(train_valid_test_dataset_provider,
     if args.mos or args.kd: # Set up teacher model
         args.teacher_model = setup_teacher_model(args, model_provider)
 
+    # Mark the end of setup
     if args.deepspeed:
         if get_accelerator().device_name() == 'xla':
             get_accelerator().synchronize()
@@ -683,11 +692,6 @@ def train_step(forward_step_func, data_iterator,
                model, optimizer, opt_param_scheduler, config):
     """Single training step."""
     args = get_args()
-
-    if args.deepspeed:
-        if get_accelerator().device_name() == 'xla':
-            get_accelerator().synchronize()
-
     timers = get_timers()
 
     if args.deepspeed and args.ds_pipeline_enabled:
@@ -735,6 +739,7 @@ def train_step(forward_step_func, data_iterator,
         decoder_seq_length=args.decoder_seq_length,
         forward_only=False)
 
+    # Mark the end of the forward-backward step.
     if args.deepspeed:
         if get_accelerator().device_name() == 'xla':
             get_accelerator().synchronize()
@@ -768,11 +773,13 @@ def train_step(forward_step_func, data_iterator,
                     args.data_parallel_size
         model[0].step(lr_kwargs={'increment': increment})
         update_successful = model[0].was_step_applied()
-
-        if get_accelerator().device_name() == 'xla':
-            get_accelerator().synchronize()
     else:
         update_successful, grad_norm, num_zeros_in_grad = optimizer.step(args, timers)
+
+    # Mark the end of the optimizer step.
+    if get_accelerator().device_name() == 'xla':
+        get_accelerator().synchronize()
+
     timers('optimizer').stop()
 
     # Gather params.
@@ -885,11 +892,6 @@ def training_log(loss_dict, total_loss_dict, learning_rate, iteration,
                  model=None, optimizer=None):
     """Log training information such as losses, timing, ...."""
     args = get_args()
-
-    if args.deepspeed:
-        if get_accelerator().device_name() == 'xla':
-            get_accelerator().synchronize()
-
     timers = get_timers()
     writer = interop_tool_logger(tb_writer=get_tensorboard_writer(), \
                                  wandb_writer=get_wandb_writer())
@@ -916,10 +918,14 @@ def training_log(loss_dict, total_loss_dict, learning_rate, iteration,
             total_loss_dict[key] = total_loss_dict.get(
                 key, get_accelerator().FloatTensor([0.0])) + loss_dict[key]
         else:
-            value = loss_dict[key].float().sum().item()
-            is_nan = value == float('inf') or \
-                     value == -float('inf') or \
-                     value != value
+            value = loss_dict[key].float().sum()
+
+            # Synchronize before checking for nan/inf
+            if args.deepspeed:
+                if get_accelerator().device_name() == 'xla':
+                    get_accelerator().synchronize()
+
+            is_nan = torch.isinf(value) or torch.isnan(value)
             got_nan = got_nan or is_nan
     total_loss_dict[nan_iters_key] = total_loss_dict.get(
         nan_iters_key, 0) + int(got_nan)
@@ -1071,18 +1077,39 @@ def training_log(loss_dict, total_loss_dict, learning_rate, iteration,
 
             for _, group in enumerate(optimizer.param_groups):
                 for _, param in enumerate(group['params']):
-                    opt_stats[0] += (torch.norm(optimizer.state[param]['exp_avg_sq']).item())**2
-                    opt_stats[1] += (torch.norm(optimizer.state[param]['exp_avg_sq'].sqrt()).item())**2
-                    opt_stats[2] += (torch.norm(optimizer.state[param]['exp_avg']).item())**2
-                    opt_stats[3] += (torch.norm(param).item())**2
-                    opt_stats[4] += torch.norm(optimizer.state[param]['exp_avg_sq'],p=1).item()
-                    opt_stats[5] += torch.norm(optimizer.state[param]['exp_avg_sq'].sqrt(),p=1).item()
-                    opt_stats[6] += torch.norm(optimizer.state[param]['exp_avg'],p=1).item()
-                    opt_stats[7] += torch.norm(param,p=1).item()
-                    opt_stats_2[0] = max(opt_stats_2[0], abs(optimizer.state[param]['exp_avg_sq'].max().item()), abs(optimizer.state[param]['exp_avg_sq'].min().item()))
-                    opt_stats_2[1] = max(opt_stats_2[1], optimizer.state[param]['exp_avg_sq'].sqrt().abs_().max().item())
-                    opt_stats_2[2] = max(opt_stats_2[2], abs(optimizer.state[param]['exp_avg'].max().item()), abs(optimizer.state[param]['exp_avg'].min().item()))
-                    opt_stats_2[3] = max(opt_stats_2[3], abs(param.max().item()), abs(param.min().item()))
+                    opt_stats_value_0 = torch.norm(optimizer.state[param]['exp_avg_sq'])
+                    opt_stats_value_1 = torch.norm(optimizer.state[param]['exp_avg_sq'].sqrt())
+                    opt_stats_value_2 = torch.norm(optimizer.state[param]['exp_avg'])
+                    opt_stats_value_3 = torch.norm(param)
+                    opt_stats_value_4 = torch.norm(optimizer.state[param]['exp_avg_sq'], p=1)
+                    opt_stats_value_5 = torch.norm(optimizer.state[param]['exp_avg_sq'].sqrt(),p=1)
+                    opt_stats_value_6 = torch.norm(optimizer.state[param]['exp_avg'],p=1)
+                    opt_stats_value_7 = torch.norm(param,p=1)
+                    opt_stats_2_value_0_0 = optimizer.state[param]['exp_avg_sq'].max()
+                    opt_stats_2_value_0_1 = optimizer.state[param]['exp_avg_sq'].min()
+                    opt_stats_2_value_1 = optimizer.state[param]['exp_avg_sq'].sqrt().abs_().max()
+                    opt_stats_2_value_2_0 = optimizer.state[param]['exp_avg'].max()
+                    opt_stats_2_value_2_1 = optimizer.state[param]['exp_avg'].min()
+                    opt_stats_2_value_3_0 = param.max()
+                    opt_stats_2_value_3_1 = param.min()
+
+                    # Synchronize before accessing `opt_stats_*`
+                    if args.deepspeed:
+                        if get_accelerator().device_name() == 'xla':
+                            get_accelerator().synchronize()
+
+                    opt_stats[0] += (opt_stats_value_0.item())**2
+                    opt_stats[1] += (opt_stats_value_1.item())**2
+                    opt_stats[2] += (opt_stats_value_2.item())**2
+                    opt_stats[3] += (opt_stats_value_3.item())**2
+                    opt_stats[4] += opt_stats_value_4.item()
+                    opt_stats[5] += opt_stats_value_5.item()
+                    opt_stats[6] += opt_stats_value_6.item()
+                    opt_stats[7] += opt_stats_value_7.item()
+                    opt_stats_2[0] = max(opt_stats_2[0], abs(opt_stats_2_value_0_0.item()), abs(opt_stats_2_value_0_1.item()))
+                    opt_stats_2[1] = max(opt_stats_2[1], opt_stats_2_value_1.item())
+                    opt_stats_2[2] = max(opt_stats_2[2], abs(opt_stats_2_value_2_0.item()), abs(opt_stats_2_value_2_1.item()))
+                    opt_stats_2[3] = max(opt_stats_2[3], abs(opt_stats_2_value_3_0.item()), abs(opt_stats_2_value_3_1.item()))
             # print('step {} rank {} before sync opt_stats {}, {}'.format(iteration, torch.distributed.get_rank(), opt_stats_2, opt_stats))
             if args.zero_stage > 0:
                 # ZeRO partiions optimizer states
@@ -1105,6 +1132,11 @@ def training_log(loss_dict, total_loss_dict, learning_rate, iteration,
                 opt_stats_2 = get_accelerator().FloatTensor(opt_stats_2)
                 torch.distributed.all_reduce(opt_stats_2, op=torch.distributed.ReduceOp.MAX,
                     group=mpu.get_pipeline_model_parallel_group())
+
+            # Synchronize before accessing `opt_stats_2`
+            if args.deepspeed:
+                if get_accelerator().device_name() == 'xla':
+                    get_accelerator().synchronize()
 
             # print('step {} rank {} after sync opt_stats {}, {}'.format(iteration, torch.distributed.get_rank(), opt_stats_2, opt_stats))
             if writer.is_enabled() and is_last_rank():
@@ -1185,6 +1217,11 @@ def training_log(loss_dict, total_loss_dict, learning_rate, iteration,
         log_string += ' learning rate: {:.3E} |'.format(learning_rate)
         log_string += ' global batch size: {:5d} |'.format(batch_size)
 
+        # Synchronize before accessing `total_loss_dict`
+        if args.deepspeed:
+            if get_accelerator().device_name() == 'xla':
+                get_accelerator().synchronize()
+
         for key in total_loss_dict:
             if key not in [advanced_iters_key, skipped_iters_key,
                            nan_iters_key]:
@@ -1228,32 +1265,14 @@ def training_log(loss_dict, total_loss_dict, learning_rate, iteration,
 
 def save_checkpoint_and_time(iteration, model, optimizer, opt_param_scheduler):
     args = get_args()
-
-    if args.deepspeed:
-        if get_accelerator().device_name() == 'xla':
-            get_accelerator().synchronize()
-
     timers = get_timers()
     # Extra barrier is added to make sure
     # all ranks report the max time.
     timers('save-checkpoint', log_level=0).start(barrier=True)
     save_checkpoint(iteration, model, optimizer, opt_param_scheduler)
-
-    if args.deepspeed:
-        if get_accelerator().device_name() == 'xla':
-            get_accelerator().synchronize()
-
     timers('save-checkpoint').stop(barrier=True)
     checkpoint_throughput_calculator(model, timers('save-checkpoint').elapsed(reset=False))
     timers.log(['save-checkpoint'])
-
-    if args.deepspeed:
-        if get_accelerator().device_name() == 'xla':
-            import gc
-
-            gc.collect()
-
-            get_accelerator().synchronize()
 
 
 def train(forward_step_func, model, optimizer, opt_param_scheduler,
@@ -1403,6 +1422,12 @@ def train(forward_step_func, model, optimizer, opt_param_scheduler,
                 [train_time > args.exit_duration_in_mins])
             torch.distributed.all_reduce(
                 done_cuda, op=torch.distributed.ReduceOp.MAX)
+
+            # Synchronize before accessing `done_cuda`
+            if args.deepspeed:
+                if get_accelerator().device_name() == 'xla':
+                    get_accelerator().synchronize()
+
             done = done_cuda.item()
             if done:
                 if not saved_checkpoint:
@@ -1491,6 +1516,7 @@ def evaluate(forward_step_func,
                     decoder_seq_length=args.decoder_seq_length,
                     forward_only=True)
 
+            # Mark the end of forward step
             if args.deepspeed:
                 if get_accelerator().device_name() == 'xla':
                     get_accelerator().synchronize()
@@ -1525,6 +1551,7 @@ def evaluate(forward_step_func,
                 forward_only=True,
                 collect_non_loss_data=True)
 
+            # Mark the end of forward step
             if args.deepspeed:
                 if get_accelerator().device_name() == 'xla':
                     get_accelerator().synchronize()
@@ -1554,10 +1581,6 @@ def evaluate_and_print_results(prefix, forward_step_func,
     """Helper function to evaluate and dump results on screen."""
     args = get_args()
 
-    if args.deepspeed:
-        if get_accelerator().device_name() == 'xla':
-            get_accelerator().synchronize()
-
     if write_to_tensorboard:
         writer = interop_tool_logger(tb_writer=get_tensorboard_writer(), wandb_writer=get_wandb_writer())
     else:
@@ -1569,6 +1592,12 @@ def evaluate_and_print_results(prefix, forward_step_func,
         forward_step_func, data_iterator, model,
         process_non_loss_data_func, config, verbose)
     string = ' validation loss at {} | '.format(prefix)
+
+    # Synchronize before accessing `total_loss_dict`
+    if args.deepspeed:
+        if get_accelerator().device_name() == 'xla':
+            get_accelerator().synchronize()
+
     for key in total_loss_dict:
         total_loss = total_loss_dict[key].item()
         string += '{} value: {:.6E} | '.format(key, total_loss)
@@ -1689,6 +1718,12 @@ def build_train_valid_test_data_loaders(
         torch.distributed.broadcast(flags,
                                     mpu.get_tensor_model_parallel_src_rank(),
                                     group=mpu.get_tensor_model_parallel_group())
+
+    # Synchronize before accessing `flags`
+    if args.deepspeed:
+        if get_accelerator().device_name() == 'xla':
+            get_accelerator().synchronize()
+
     args.do_train = flags[0].item()
     args.do_valid = flags[1].item()
     args.do_test = flags[2].item()

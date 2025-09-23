@@ -90,6 +90,12 @@ def calc_params_l2_norm(model):
     torch.distributed.all_reduce(norm_2,
                                  op=torch.distributed.ReduceOp.SUM,
                                  group=mpu.get_model_parallel_group())
+
+    # Synchronize before accessing `norm_2`
+    if args.deepspeed:
+        if get_accelerator().device_name() == 'xla':
+            get_accelerator().synchronize()
+
     return norm_2.item() ** 0.5
 
 

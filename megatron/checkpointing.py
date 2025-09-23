@@ -178,6 +178,11 @@ def read_metadata(tracker_filename):
     if torch.distributed.is_initialized():
         iters_cuda = get_accelerator().LongTensor([iteration])
         torch.distributed.all_reduce(iters_cuda, op=torch.distributed.ReduceOp.MAX)
+
+        # Synchronize before accessing `iters_cuda`
+        if get_accelerator().device_name() == 'xla':
+            get_accelerator().synchronize()
+
         max_iter = iters_cuda[0].item()
 
         # We should now have all the same iteration.
@@ -308,6 +313,11 @@ def save_checkpoint(iteration, model, optimizer, opt_param_scheduler):
     # Wait so everyone is done (necessary)
     if torch.distributed.is_initialized():
         torch.distributed.barrier()
+
+    # Mark the end of checkpointing step.
+    if args.deepspeed:
+        if get_accelerator().device_name() == 'xla':
+            get_accelerator().synchronize()
 
     print_rank_0('  successfully saved checkpoint at iteration {:7d} to {}' \
                  .format(iteration, args.save))
