@@ -739,6 +739,10 @@ def train_step(forward_step_func, data_iterator,
         decoder_seq_length=args.decoder_seq_length,
         forward_only=False)
 
+    import os
+    print(f">>>> pid={os.getpid()}, rank={args.rank}\n",
+            f">>> fwd bwd ok", flush=True)
+
     # Mark the end of the forward-backward step.
     if args.deepspeed:
         if get_accelerator().device_name() == 'xla':
@@ -1337,6 +1341,9 @@ def train(forward_step_func, model, optimizer, opt_param_scheduler,
                        optimizer,
                        opt_param_scheduler,
                        config)
+        import os
+        print(f">>>> pid={os.getpid()} rank={torch.distributed.get_rank()}\n"
+              f">>> train step {iteration} ok", flush=True)
         iteration += 1
         args.iteration = iteration
         new_samples = mpu.get_data_parallel_world_size() * \

@@ -20,7 +20,7 @@ seq_len=2048
 model_size=0.125
 num_layers=4
 hidden_size=768
-num_attn_heads=12
+num_attn_heads=8
 global_batch_size=2
 lr=6.0e-4
 min_lr=1.0e-6
@@ -131,7 +131,7 @@ lr_decay_style="cosine"
 ###############################################################################
 ### Parallelism configs
 ## Model parallelism, 1 is no MP
-mp_size=1
+mp_size=8
 
 ## Pipeline parallelism. To disable PP, set pp_size to 1 and no_pp to true.
 ## Note that currently both curriculum learning and random-LTD are NOT
@@ -143,8 +143,8 @@ no_pp="true"
 zero_stage=0
 
 ## Total number of GPUs. ds_ssh is from DeepSpeed library.
-num_gpus=2
-num_gpus_pernode=2
+num_gpus=8
+num_gpus_pernode=8
 num_node=1
 
 ## Data parallel size.
@@ -317,8 +317,8 @@ if [[ $iteration -gt 0 ]]; then
     ds_ssh "echo $iteration_2 > $iteration_file_2"
 fi
 
-# torchrun --nnode=$num_node --nproc_per_node=$num_gpus_pernode \
-deepspeed \
+
+torchrun --nnode=$num_node --nproc_per_node=$num_gpus_pernode -r 3 --log-dir ./output --tee 3 \
     ${dir}/../../pretrain_gpt.py \
     ${megatron_options} ${data_options} ${deepspeed_options} \
     2>&1 | tee ${log_path}/${jobname}_${host}_${current_time}.log

@@ -1343,6 +1343,13 @@ class ParallelTransformerLayer(MegatronModule):
         # Layer norm at the beginning of the transformer layer.
         layernorm_output = self.input_layernorm(hidden_states)
 
+        if get_accelerator().device_name() == 'xla':
+            get_accelerator().synchronize()
+
+        import os
+        print(f">>>> pid={os.getpid()} rank={torch.distributed.get_rank()}\n"
+              f">>> after input layer norm", flush=True)
+
         # Self attention.
         if self.ds_sequence_parallel_fpdt_offloading:
             attention_output, attention_bias = \
@@ -1365,6 +1372,12 @@ class ParallelTransformerLayer(MegatronModule):
             residual = layernorm_output
         else:
             residual = hidden_states
+
+        if get_accelerator().device_name() == 'xla':
+            get_accelerator().synchronize()
+
+        print(f">>>> pid={os.getpid()} rank={torch.distributed.get_rank()}\n"
+              f">>> after self attention", flush=True)
 
         # FPDT does not support dropout yet.
         if not self.ds_sequence_parallel_fpdt:
@@ -1401,6 +1414,12 @@ class ParallelTransformerLayer(MegatronModule):
 
         # Layer norm post the self attention.
         layernorm_output = self.post_attention_layernorm(layernorm_input)
+
+        if get_accelerator().device_name() == 'xla':
+            get_accelerator().synchronize()
+
+        print(f">>>> pid={os.getpid()}, rank={torch.distributed.get_rank()}\n"
+                f">>> after post attention layer norm", flush=True)
 
         # Cross attention.
         if self.layer_type == LayerType.encoder:
@@ -1453,6 +1472,12 @@ class ParallelTransformerLayer(MegatronModule):
             residual = layernorm_output
         else:
             residual = layernorm_input
+
+        if get_accelerator().device_name() == 'xla':
+            get_accelerator().synchronize()
+
+        print(f">>>> pid={os.getpid()} rank={torch.distributed.get_rank()}\n"
+                f">>> after mlp", flush=True)
 
         # FPDT does not support dropout yet.
         if not self.ds_sequence_parallel_fpdt:
@@ -2128,10 +2153,20 @@ class ParallelTransformer(MegatronModule):
                     for index in range(self.num_layers):
                         layer = self._get_layer(index)
 
+                        import os
+                        print(f">>>> pid={os.getpid()}, rank={torch.distributed.get_rank()}\n"
+                                f">>> before layer {index} forward", flush=True)
+
                         hidden_states = layer(
                             hidden_states,
                             attention_mask,
                             **forward_kwargs)
+
+                        if get_accelerator().device_name() == 'xla':
+                            get_accelerator().synchronize()
+
+                        print(f">>>> pid={os.getpid()}, rank={torch.distributed.get_rank()}\n"
+                              f">>> after layer {index} forward", flush=True)
 
                         # First Retro decoder layer returns both hidden_states
                         # and retriever_output. Make retriever_output available
@@ -2152,6 +2187,9 @@ class ParallelTransformer(MegatronModule):
                 if torch.is_grad_enabled() and self.training:
                     self.microbatch_count += 1
 
+        print(f">>>> pid={os.getpid()}, rank={torch.distributed.get_rank()}\n"
+                f">>> after all layers forward", flush=True)
+
         # Final layer norm.
         if self.post_process and self.post_layer_norm:
             # TODO: Below old DeepSpeed code are commented because it's unsure whether
@@ -2160,6 +2198,12 @@ class ParallelTransformer(MegatronModule):
             #     # Reverting data format change [s b h] --> [b s h].
             #     hidden_states = hidden_states.transpose(0, 1).contiguous()
             hidden_states = self.final_layernorm(hidden_states)
+
+        if get_accelerator().device_name() == 'xla':
+            get_accelerator().synchronize()
+
+        print(f">>>> pid={os.getpid()}, rank={torch.distributed.get_rank()}\n"
+                f">>> after final layernorm", flush=True)
 
         return (hidden_states, *moe_losses)
 
