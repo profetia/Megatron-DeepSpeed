@@ -196,11 +196,14 @@ class VocabParallelEmbedding(torch.nn.Module):
     def forward(self, input_):
         if self.tensor_model_parallel_size > 1:
             # Build the mask.
-            input_mask = (input_ < self.vocab_start_index) | \
-                         (input_ >= self.vocab_end_index)
+            # input_mask = (input_ < self.vocab_start_index) | \
+            #              (input_ >= self.vocab_end_index)
+            input_mask = (input_ >= self.vocab_start_index) & \
+                         (input_ < self.vocab_end_index)
             # Mask the input.
             masked_input = input_.clone() - self.vocab_start_index
-            masked_input[input_mask] = 0
+            # masked_input[input_mask] = 0
+            masked_input = torch.mul(masked_input, input_mask.long())
         else:
             masked_input = input_
             # Get the embeddings.
@@ -210,7 +213,10 @@ class VocabParallelEmbedding(torch.nn.Module):
                                       self.sparse)
         # Mask the output embedding.
         if self.tensor_model_parallel_size > 1:
-            output_parallel[input_mask, :] = 0.0
+            # output_parallel[input_mask, :] = 0.0
+            output_parallel = torch.mul(
+                output_parallel, torch.unsqueeze(input_mask.float(), dim=-1)
+            )
         # Reduce across all the model parallel GPUs.
         output = reduce_from_tensor_model_parallel_region(output_parallel)
         return output
@@ -246,7 +252,6 @@ class LinearWithGradAccumulationAndAsyncCommunication(torch.autograd.Function):
     """See linear_with_grad_accumulation_and_async_allreduce"""
 
     @staticmethod
-    @custom_fwd
     def forward(ctx, input, weight, bias, gradient_accumulation_fusion,
                 async_grad_allreduce, sequence_parallel):
         ctx.save_for_backward(input, weight)
@@ -284,7 +289,6 @@ class LinearWithGradAccumulationAndAsyncCommunication(torch.autograd.Function):
         return output
 
     @staticmethod
-    @custom_bwd
     def backward(ctx, grad_output):
         args = get_args()
         input, weight = ctx.saved_tensors

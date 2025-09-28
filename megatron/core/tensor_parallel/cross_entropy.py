@@ -33,9 +33,12 @@ class _VocabParallelCrossEntropy(torch.autograd.Function):
             partition_vocab_size, rank, world_size)
 
         # Create a mask of valid vocab ids (1 means it needs to be masked).
-        target_mask = (target < vocab_start_index) | (target >= vocab_end_index)
+        # target_mask = (target < vocab_start_index) | (target >= vocab_end_index)
+        # masked_target = target.clone() - vocab_start_index
+        # masked_target[target_mask] = 0
+        target_mask = (target >= vocab_start_index) & (target < vocab_end_index)
         masked_target = target.clone() - vocab_start_index
-        masked_target = masked_target * (~target_mask)
+        masked_target = torch.mul(masked_target, target_mask.long())
 
         # Get predicted-logits = logits[target].
         # For Simplicity, we convert logits to a 2-D tensor with size
@@ -47,7 +50,8 @@ class _VocabParallelCrossEntropy(torch.autograd.Function):
         predicted_logits_1d = logits_2d[arange_1d, masked_target_1d]
         predicted_logits_1d = predicted_logits_1d.clone().contiguous()
         predicted_logits = predicted_logits_1d.view_as(target)
-        predicted_logits = predicted_logits * (~target_mask)
+        # predicted_logits[target_mask] = 0.0
+        predicted_logits = torch.mul(predicted_logits, target_mask.float())
 
         # All reduce is needed to get the chunks from other GPUs.
         torch.distributed.all_reduce(predicted_logits,
@@ -55,8 +59,9 @@ class _VocabParallelCrossEntropy(torch.autograd.Function):
                                      group=get_tensor_model_parallel_group())
 
         # Sum of exponential of logits along vocab dimension across all GPUs.
-        exp_logits = vocab_parallel_logits
-        torch.exp(vocab_parallel_logits, out=exp_logits)
+        # exp_logits = vocab_parallel_logits
+        # torch.exp(vocab_parallel_logits, out=exp_logits)
+        exp_logits = torch.exp(vocab_parallel_logits)
         sum_exp_logits = exp_logits.sum(dim=-1)
         torch.distributed.all_reduce(sum_exp_logits,
                                      op=torch.distributed.ReduceOp.SUM,

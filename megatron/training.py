@@ -918,14 +918,10 @@ def training_log(loss_dict, total_loss_dict, learning_rate, iteration,
             total_loss_dict[key] = total_loss_dict.get(
                 key, get_accelerator().FloatTensor([0.0])) + loss_dict[key]
         else:
-            value = loss_dict[key].float().sum()
-
-            # Synchronize before checking for nan/inf
-            if args.deepspeed:
-                if get_accelerator().device_name() == 'xla':
-                    get_accelerator().synchronize()
-
-            is_nan = torch.isinf(value) or torch.isnan(value)
+            value = loss_dict[key].float().sum().item()
+            is_nan = value == float('inf') or \
+                     value == -float('inf') or \
+                     value != value
             got_nan = got_nan or is_nan
     total_loss_dict[nan_iters_key] = total_loss_dict.get(
         nan_iters_key, 0) + int(got_nan)

@@ -301,8 +301,6 @@ def forward_step(data_iterator, model):
             mos_loss = calculate_mos_loss(args, stu_output,
                 args.teacher_model[0], tokens, position_ids, attention_mask)
 
-    if get_accelerator().device_name() == 'xla':
-        get_accelerator().synchronize()
 
 
     # Output_tensor stores the standard loss, loos_func calculates the total loss.
